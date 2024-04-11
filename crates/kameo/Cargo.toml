@@ -18,10 +18,12 @@ num_cpus = "1.0"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tracing = "0.1"
 trait-variant = "0.1"
+tokio-stream = "0.1.15"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_tokio"] }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { version = "0.1.15", features = ["time"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[bench]]

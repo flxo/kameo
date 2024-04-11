@@ -1,15 +1,16 @@
 use std::{
     collections::HashMap,
-    convert,
+    convert, hash,
     panic::AssertUnwindSafe,
     sync::{Arc, Mutex},
 };
 
 use futures::{
     stream::{AbortHandle, AbortRegistration, Abortable},
-    FutureExt,
+    FutureExt, Stream, StreamExt,
 };
 use tokio::sync::mpsc;
+use tokio_stream::StreamMap;
 use tracing::{error, trace};
 
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
     actor_kind::{ActorState, SyncActor, UnsyncActor},
     actor_ref::{ActorRef, Links, Signal, CURRENT_ACTOR_REF},
     error::{ActorStopReason, PanicError},
+    message::DynMessage,
 };
 
 /// Spawns an actor in a `tokio::task`.
@@ -175,6 +177,10 @@ where
     A: Actor,
     S: ActorState<A>,
 {
+    let mut streams =
+        StreamMap::<StreamKey, Box<dyn Stream<Item = Box<dyn DynMessage<A>>> + Send + Unpin>>::new(
+        );
+
     loop {
         tokio::select! {
             biased;
@@ -202,6 +208,14 @@ where
                         return reason;
                     }
                 }
+                Some(Signal::AttachStream { stream }) => {
+                    streams.insert(StreamKey, stream);
+                }
+            },
+            Some((_, message)) = streams.next(), if !streams.is_empty() => {
+                if let Some(reason) = state.handle_message(message, None).await {
+                    return reason;
+                }
             }
         }
     }
@@ -219,4 +233,21 @@ fn log_actor_stop_reason(id: u64, name: &str, reason: &ActorStopReason) {
             error!(%id, %name, %reason, "actor stopped")
         }
     }
+}
+
+/// Key for the stream map. The `StreamMap` operates internally on indices,
+/// so we can use a dummy key that never matches any other.
+#[derive(Clone)]
+struct StreamKey;
+
+impl PartialEq for StreamKey {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+
+impl Eq for StreamKey {}
+
+impl hash::Hash for StreamKey {
+    fn hash<H: hash::Hasher>(&self, hasher: &mut H) {}
 }

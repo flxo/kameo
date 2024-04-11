@@ -10,7 +10,8 @@ use std::{
 };
 
 use dyn_clone::DynClone;
-use futures::stream::AbortHandle;
+use futures::StreamExt;
+use futures::{stream::AbortHandle, Stream};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -262,6 +263,19 @@ impl<A> ActorRef<A> {
         sibbling_links.remove(&self.id);
     }
 
+    /// Attaches a stream of messages to the actor.
+    pub async fn attach_stream<M, S>(&self, stream: S) -> Result<(), SendError<M>>
+    where
+        A: Message<M>,
+        M: Send + 'static,
+        S: Stream<Item = M> + Send + Unpin + 'static,
+    {
+        let stream = stream.map(|msg| Box::new(msg) as Box<dyn DynMessage<A>>);
+        let stream =
+            Box::new(stream) as Box<dyn Stream<Item = Box<dyn DynMessage<A>>> + Send + Unpin>;
+        Ok(self.mailbox.send(Signal::AttachStream { stream })?)
+    }
+
     pub(crate) fn signal_mailbox(&self) -> Box<dyn SignalMailbox>
     where
         A: 'static,
@@ -335,6 +349,9 @@ pub(crate) enum Signal<A> {
     LinkDied {
         id: u64,
         reason: ActorStopReason,
+    },
+    AttachStream {
+        stream: Box<dyn Stream<Item = Box<dyn DynMessage<A>>> + Send + Unpin>,
     },
     Stop,
 }
